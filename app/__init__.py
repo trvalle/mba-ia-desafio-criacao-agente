@@ -1,0 +1,1 @@
+"""Residencial Aurora application package."""
