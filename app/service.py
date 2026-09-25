@@ -98,7 +98,7 @@ class ConversationService:
             details = {"nome": name, "data": date}
             with self.db.transaction(immediate=True) as conn:
                 conn.execute(
-                    "INSERT INTO confirmations(id, session_id, kind, details, created_at) VALUES (?, ?, 'autorizar_visitante', ?, datetime('now'))",
+                    "INSERT INTO aurora_confirmations(id, session_id, kind, details, created_at) VALUES (?, ?, 'autorizar_visitante', ?, datetime('now'))",
                     (confirmation_id, session_id, __import__('json').dumps(details, ensure_ascii=False)),
                 )
             self._pending_event(session_id, "autorizar_visitante", details, confirmation_id)
@@ -128,7 +128,7 @@ class ConversationService:
                 details = {"area": area, "data": date}
                 with self.db.transaction(immediate=True) as conn:
                     conn.execute(
-                        "INSERT INTO confirmations(id, session_id, kind, details, created_at) VALUES (?, ?, 'reservar_area_com_cobranca', ?, datetime('now'))",
+                        "INSERT INTO aurora_confirmations(id, session_id, kind, details, created_at) VALUES (?, ?, 'reservar_area_com_cobranca', ?, datetime('now'))",
                         (confirmation_id, session_id, __import__('json').dumps(details, ensure_ascii=False)),
                     )
                 self._pending_event(session_id, "reservar_area_com_cobranca", details, confirmation_id)
@@ -169,20 +169,20 @@ class ConversationService:
         adk_confirmation = ToolConfirmation(confirmed=confirmed)
         with self.db.transaction(immediate=True) as conn:
             row = conn.execute(
-                "SELECT * FROM confirmations WHERE id=? AND session_id=? AND status='pending'",
+                "SELECT * FROM aurora_confirmations WHERE id=? AND session_id=? AND status='pending'",
                 (confirmation_id, session_id),
             ).fetchone()
             if row is None:
                 raise ValueError("confirmation_not_pending")
             details = __import__('json').loads(row["details"])
-            session = conn.execute("SELECT apartment FROM sessions WHERE id=?", (session_id,)).fetchone()
+            session = conn.execute("SELECT apartment FROM aurora_sessions WHERE id=?", (session_id,)).fetchone()
             apartment = session["apartment"]
             result: dict[str, Any]
             if not adk_confirmation.confirmed:
                 result = {"status": "DECLINED"}
             elif row["kind"] == "autorizar_visitante":
                 conn.execute(
-                    "INSERT OR IGNORE INTO visitors(apartment, name, date, created_at) VALUES (?, ?, ?, ?)",
+                    "INSERT OR IGNORE INTO aurora_visitors(apartment, name, date, created_at) VALUES (?, ?, ?, ?)",
                     (apartment, details["nome"], details["data"], __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()),
                 )
                 result = {"status": "CREATED", "nome": details["nome"], "data": details["data"]}
@@ -190,16 +190,16 @@ class ConversationService:
                 code = self.domain._next_code(conn)
                 try:
                     conn.execute(
-                        "INSERT INTO reservations(code, apartment, area, date, status, created_at) VALUES (?, ?, ?, ?, 'active', datetime('now'))",
+                        "INSERT INTO aurora_reservations(code, apartment, area, date, status, created_at) VALUES (?, ?, ?, ?, 'active', datetime('now'))",
                         (code, apartment, details["area"], details["data"]),
                     )
                     result = {"status": "CREATED", "codigo": code}
                 except __import__('sqlite3').IntegrityError as exc:
-                    if "reservations.area, reservations.date" in str(exc):
+                    if "aurora_reservations.area, aurora_reservations.date" in str(exc):
                         result = {"status": "OCCUPIED"}
                     else:
                         raise
-            conn.execute("UPDATE confirmations SET status=?, result=?, resolved_at=datetime('now') WHERE id=?", ("approved" if confirmed else "rejected", __import__('json').dumps(result), confirmation_id))
+            conn.execute("UPDATE aurora_confirmations SET status=?, result=?, resolved_at=datetime('now') WHERE id=?", ("approved" if confirmed else "rejected", __import__('json').dumps(result), confirmation_id))
         self.db.add_event(session_id, "confirmation_response", "system", {"confirmation_id": confirmation_id, "confirmado": confirmed})
         if result["status"] == "CREATED":
             answer = "Autorização registrada." if row["kind"] == "autorizar_visitante" else "Reserva criada."
